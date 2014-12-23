@@ -1,4 +1,10 @@
 
+/*
+ * Note:
+ *	1. fclose will close the fd, too !!!
+ *
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -91,7 +97,7 @@ void do_ls(int fd, char *dir) {
 
 char* file_type(char *f) {
 	char *pc;
-	if( (pc = strchr(f, ',')) != NULL ) {
+	if( (pc = strchr(f, '.')) != NULL ) {
 		return pc + 1;
 	}
 	return "";
@@ -148,7 +154,7 @@ void do_cat(int fd, char *f) {
 
 	fclose(fpsock);
 	fclose(fpfile);
-	printf("do_cat SUC!\n");
+	printf("do_cat SUC! filename[%s]\n", f);
 }
 
 void dispatch(int fd, char *request) {
@@ -171,7 +177,7 @@ void dispatch(int fd, char *request) {
 		printf("in do_ls\n");
 		do_ls(fd, arg);
 	}
-	else if( strcmp(file_type(arg), "cgi") == 0 ) {
+	else if( strcmp(file_type(arg + 2), "cgi") == 0 ) {
 		printf("in do_exec\n");
 		do_exec(fd, arg);
 	}
@@ -194,9 +200,10 @@ void process_request(int fd) {
 	char buf[256];
 	while( fgets(buf, sizeof(buf), fpin) != NULL
 			&& strcmp(buf, "\r\n") != 0 ) ;
-	fclose(fpin);
-
 	dispatch(fd, request);
+
+	// attention: fclose will close the fd, too !!!
+	fclose(fpin);
 }
 
 void child_waiter(int signum) {
