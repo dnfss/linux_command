@@ -1,10 +1,14 @@
 
 /**
   * Note
-  * 	zero-copy: splice, sendfile
+  *		1. POLLRDHUP
+  *			Stream socket peer closed connection, or shut down writing half of connection.
+  *			The _GNU_SOURCE feature test macro must be defined (before including any header files) in order to obtain this definition.
+  * 	2. zero-copy: splice, sendfile
   * 	http://stackoverflow.com/questions/8626263/understanding-sendfile-and-splice
   */
 
+#define _GNU_SOURCE 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -15,6 +19,7 @@
 #include <stdlib.h>
 #include <poll.h>
 #include <fcntl.h>
+#include <errno.h>
 
 const int BUFFER_SIZE = 64;
 
@@ -38,7 +43,7 @@ int main(int argc, char *argv[]) {
 
 	int ret;
 	if( (ret = connect(sockfd, (struct sockaddr*)&svrAddr, sizeof(svrAddr))) < 0 ){
-		printf("ERR! connect ret[%d]\n", ret);
+		printf("ERR! connect ret[%d], errno[%d]\n", ret, errno);
 		return -3;
 	}
 
