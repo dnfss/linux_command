@@ -5,7 +5,8 @@
   *			Stream socket peer closed connection, or shut down writing half of connection.
   *			The _GNU_SOURCE feature test macro must be defined (before including any header files) in order to obtain this definition.
   * 	2. zero-copy: splice, sendfile
-  * 	http://stackoverflow.com/questions/8626263/understanding-sendfile-and-splice
+  *			http://stackoverflow.com/questions/8626263/understanding-sendfile-and-splice
+  * 	3. example of poll
   */
 
 #define _GNU_SOURCE 

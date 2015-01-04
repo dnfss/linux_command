@@ -17,9 +17,9 @@
 #define READ_BUFFER_SIZE 64
 
 struct clientData {
-	sockaddr_in addr;
 	char *writeBuf;
 	char buf[READ_BUFFER_SIZE];
+	struct sockaddr_in addr;
 };
 
 int setnonblock(int fd) {
@@ -74,7 +74,6 @@ int main(int argc, char *argv[]) {
 			printf("ERR! poll ret[%d]\n", ret);
 			return -5;
 		}
-		printf("poll ret[%d]\n", ret);
 
 		for(i = 0; i < userCnt + 1; ++i) {
 			if( fds[i].fd == listenfd && fds[i].revents & POLLIN ) {
@@ -137,7 +136,7 @@ int main(int argc, char *argv[]) {
 				else if( ret > 0 ) {
 					int j;
 					for(j = 1; j <= userCnt; ++j) {
-						if( fds[j].fd == listenfd ) {
+						if( fds[j].fd == listenfd || fds[j].fd == fds[i].fd ) {
 							continue;
 						}
 
