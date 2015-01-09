@@ -6,7 +6,7 @@
   *			The _GNU_SOURCE feature test macro must be defined (before including any header files) in order to obtain this definition.
   * 	2. zero-copy: splice, sendfile
   *			http://stackoverflow.com/questions/8626263/understanding-sendfile-and-splice
-  * 	3. example of poll
+  * 	3. demonstrate how to use poll and connect with timeout
   */
 
 #define _GNU_SOURCE 
@@ -24,28 +24,53 @@
 
 const int BUFFER_SIZE = 64;
 
-int main(int argc, char *argv[]) {
-	if( argc < 2 ) {
-		printf("usage: %s ip port\n", basename(argv[0]));
-		return -1;
-	}
-
+int Connect(const char *ip, int port, int timeoutInMs) {
 	struct sockaddr_in svrAddr;
 	bzero(&svrAddr, sizeof(svrAddr));
 	svrAddr.sin_family = AF_INET;
-	svrAddr.sin_port = htons(atoi(argv[2]));
-	inet_pton(AF_INET, argv[1], &svrAddr.sin_addr);
+	svrAddr.sin_port = htons(port);
+	inet_pton(AF_INET, ip, &svrAddr.sin_addr);
 
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if( sockfd < 0 ) {
-		printf("ERR! sock ret[%d]\n", sockfd);
-		return -2;
+		printf("ERR! <Connect> socket ret[%d], errno[%d]\n", sockfd, errno);
+		return -1;
 	}
 
 	int ret;
+	struct timeval timeout;
+	timeout.tv_sec = 0;
+	timeout.tv_usec = timeoutInMs * 1000;
+	if( (ret = setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout))) < 0 ) {
+		printf("ERR! <Connect> setsockopt ret[%d], errno[%d]\n", ret, errno);
+		close(sockfd);
+		return -2;
+	}
+
 	if( (ret = connect(sockfd, (struct sockaddr*)&svrAddr, sizeof(svrAddr))) < 0 ){
-		printf("ERR! connect ret[%d], errno[%d]\n", ret, errno);
+		if( errno == EINPROGRESS ) {
+			printf("ERR! <Connect> connect timeout in %dms\n", timeoutInMs);
+		}
+		else {
+			printf("ERR! connect ret[%d], errno[%d]\n", ret, errno);
+		}
+		close(sockfd);
 		return -3;
+	}
+
+	return sockfd;
+}
+
+int main(int argc, char *argv[]) {
+	if( argc != 4 ) {
+		printf("usage: %s ip port timeout(ms)\n", basename(argv[0]));
+		return -1;
+	}
+
+	int sockfd = Connect(argv[1], atoi(argv[2]), atoi(argv[3]));
+	if( sockfd < 0 ) {
+		printf("ERR! Connect ret[%d]\n", sockfd);
+		return -2;
 	}
 
 	struct pollfd fds[2];
@@ -59,7 +84,7 @@ int main(int argc, char *argv[]) {
 
 	char readBuf[BUFFER_SIZE];
 
-	int pipefd[2];
+	int ret, pipefd[2];
 	if( (ret = pipe(pipefd)) == -1 ) {
 		printf("ERR! pipe ret[%d]\n", ret);
 		return -5;
