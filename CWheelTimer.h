@@ -11,26 +11,19 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
-const int BUFFER_SIZE = 64;
-
-class WheelTimerNode;
-struct ClientData {
-	int sockfd;
-	struct sockaddr_in addr;
-	char buf[BUFFER_SIZE];
-	WheelTimerNode *timer;
-};
+const int N = 60;
+const int SI = 1;
 
 struct WheelTimerNode {
-	WheelTimerNode(int rot, int ts, void (*func)(ClientData*), ClientData *data):
+	WheelTimerNode(int rot, int ts, void (*func)(void*), void *data):
 		next(NULL), prev(NULL), rotation(rot), timeSlot(ts), cb_func(func), userData(data) {}
 
 	int rotation;
 	int timeSlot;
-	ClientData *userData;
 	WheelTimerNode *next;
 	WheelTimerNode *prev;
-	void (*cb_func)(ClientData *data);
+	void *userData;
+	void (*cb_func)(void *data);
 };
 
 class CWheelTimer {
@@ -52,7 +45,7 @@ class CWheelTimer {
 			}
 		}
 
-		WheelTimerNode* AddTimer(int timeout, void (*func)(ClientData*), ClientData *data) {
+		WheelTimerNode* AddTimer(int timeout, void (*func)(void*), void *data) {
 			if( timeout <= 0 ) {
 				return NULL;
 			}
@@ -67,11 +60,9 @@ class CWheelTimer {
 
 			int rotation = ticks / N;
 			int ts = (m_curSlot + (ticks % N)) % N;	// There must be an offset
-			WheelTimerNode timer = new WheelTimerNode(rotation, ts, func, data);
+			WheelTimerNode *timer = new WheelTimerNode(rotation, ts, func, data);
 
 			if( !m_slots[ts] ) {
-				printf("add timer, rotation[%d], ts[%d], curSlot[%d]\n",
-						rotation, ts, m_curSlot);
 				m_slots[ts] = timer;
 			}
 			else {
@@ -85,12 +76,13 @@ class CWheelTimer {
 
 		WheelTimerNode* DelayTimer(WheelTimerNode *timer, int delaySeconds) {
 			if( !timer || delaySeconds <= 0 ) {
-				return;
+				return NULL;
 			}
 
 			int remain = timer->rotation * N + (timer->timeSlot - m_curSlot + N) % N;
-			void (*func)(ClientData*) = timer->cb_func;
-			ClientData *userData = timer->userData;
+			void (*func)(void*) = timer->cb_func;
+			void *userData = timer->userData;
+			printf("in DelayTimer fd[%d]\n", *(int*)userData);
 
 			DelTimer(timer);
 			return AddTimer(remain + delaySeconds, func, userData);
@@ -120,9 +112,7 @@ class CWheelTimer {
 
 		void Tick() {
 			WheelTimerNode *tmp = m_slots[m_curSlot];
-			printf("current slot is %d\n", m_curSlot);
 			while( tmp ) {
-				printf("tick the timer once\n");
 				if( tmp->rotation > 0 ) {
 					--(tmp->rotation);
 					tmp = tmp->next;
@@ -141,7 +131,5 @@ class CWheelTimer {
 	private:
 		int m_curSlot;
 		WheelTimerNode *m_slots[N];
-
-		static const int N = 60;	// max number of slosts
-		static const int SI = 1;	// time wheel rotate per 1s
 };
+

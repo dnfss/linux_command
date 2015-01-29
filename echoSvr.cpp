@@ -4,6 +4,7 @@
  *	   1. This is an echo server which process tcp and udp
  *     2. serve multi users by one process which employ epoll
  *     3. demonstrate how to deal with signal with Unified Event Model
+ *     4. demonstrate how to deal with inactive connection
  */
 
 #include <sys/types.h>
@@ -21,11 +22,21 @@
 #include <signal.h>
 #include <string.h>
 
-#define MAX_EVENT_NUMBER 1024
-#define TCP_BUFFER_SIZE 512
-#define UDP_BUFFER_SIZE 512
+#include "CWheelTimer.h"
+
+const int TIME_SLOT = 5;
+const int FD_LIMIT = 65535;
+const int MAX_EVENT_NUMBER = 1024;
+const int TCP_BUFFER_SIZE = 512;
+const int UDP_BUFFER_SIZE = 512;
 
 static int pipefd[2];
+
+struct Data {
+	Data(int tmpFd):fd(tmpFd) {}
+
+	int fd;
+};
 
 int setnonblock(int fd) {
 	int old = fcntl(fd, F_GETFL);
@@ -99,6 +110,13 @@ void addsig(int sig) {
 	}
 }
 
+void close_inactive_conn(void *data) {
+	Data *curData = (Data*)data;
+	printf("close timeout conn fd[%d]\n", curData->fd);
+	close(curData->fd);
+	delete curData;
+}
+
 int main(int argc, char *argv[]) {
 	if( argc < 2 ) {
 		printf("usage: %s ip port\n", basename(argv[0]));
@@ -131,8 +149,13 @@ int main(int argc, char *argv[]) {
 	addsig(SIGCHLD);
 	addsig(SIGTERM);
 	addsig(SIGINT);
-	int stopSvr = 0;
+	addsig(SIGALRM);
 
+	CWheelTimer timer;
+	WheelTimerNode *timerNodes[FD_LIMIT];
+	alarm(TIME_SLOT);
+
+	int stopSvr = 0;
 	while( !stopSvr ) {
 		int cnt = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, -1);
 		if( cnt < 0 && (errno != EINTR) ) {	// check errno as epoll_wait would be interrupted by signal
@@ -148,6 +171,10 @@ int main(int argc, char *argv[]) {
 				socklen_t clientAddrLen = sizeof(clientAddr);
 				int connfd = accept(sockfd, (struct sockaddr*)&clientAddr, &clientAddrLen);
 				addfd(epollfd, connfd);
+
+				// Note: important to use dynamic allocation
+				Data *data = new Data(connfd);
+				timerNodes[connfd] = timer.AddTimer(1, close_inactive_conn, data);
 			}
 			else if( sockfd == udpfd ) {
 				char buf[UDP_BUFFER_SIZE] = {0};
@@ -170,6 +197,11 @@ int main(int argc, char *argv[]) {
 					int j;
 					for(j = 0; j < ret; ++j) {	// one signal, one byte
 						switch(strSignal[j]) {
+							case SIGALRM:
+								timer.Tick();
+								alarm(TIME_SLOT);
+								printf("tick\n");
+								break;
 							case SIGCHLD:
 							case SIGHUP:
 								printf("get signal[%d]\n", (int)strSignal[j]);
@@ -200,6 +232,13 @@ int main(int argc, char *argv[]) {
 					}
 					else {
 						send(sockfd, buf, ret, 0);
+						printf("renew fd[%d]\n", sockfd);
+
+						Data *data = (Data*)(timerNodes[sockfd]->userData);
+						timer.DelTimer(timerNodes[sockfd]);
+						delete data;
+						data = new Data(sockfd);
+						timerNodes[sockfd]= timer.AddTimer(1, close_inactive_conn, data);
 					}
 					memset(buf, 0, sizeof(buf));
 				}
