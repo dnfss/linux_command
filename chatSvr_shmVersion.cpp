@@ -2,15 +2,18 @@
 /**
   * Note
   * 	1. SA_RESTART: redo the system call which is interupted by the signal
+  *	2. demonstrate how to use share memory (shm_open -> ftruncate -> mmap)
   */
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <assert.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -32,7 +35,10 @@ struct clientData {
 	struct sockaddr_in addr;
 };
 
-static const char *SHM_NAME = "/tmp/my_shm";
+static const char *SHM_NAME = "my_shm";
+
+int stopChild;
+int sigPipefd[2];
 
 int setnonblock(int fd) {
 	int old = fcntl(fd, F_GETFL);
@@ -41,7 +47,7 @@ int setnonblock(int fd) {
 }
 
 void addfd(int epollfd, int fd) {
-	epoll_event event;
+	struct epoll_event event;
 	event.data.fd = fd;
 	event.events = EPOLLIN | EPOLLET;
 	epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
@@ -63,16 +69,6 @@ void addsig(int sig, void (*handler)(int), int restart) {
 	}
 	sigfillset(&sa.sa_mask);
 	assert(sigaction(sig, &sa, NULL) != -1);
-}
-
-void delResource() {
-	close(sigPipedfd[0]);
-	close(sigPipefd[1]);
-	close(listenfd);
-	close(epollfd);
-	shm_unlink(SHM_NAME);
-	delete[] users;
-	delete[] subProcess;
 }
 
 void childTermHandler(int sig) {
@@ -168,7 +164,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	struct epoll_event events[MAX_EVENT_NUMBER];
-	epollfd = epoll_create(5);
+	int epollfd = epoll_create(5);
 	assert(epollfd != -1);
 	addfd(epollfd, listenfd);
 
@@ -176,25 +172,24 @@ int main(int argc, char *argv[]) {
 	setnonblock(sigPipefd[1]);
 	addfd(epollfd, sigPipefd[0]);
 
-	userCnt = 0;
-	users = new clientData[USER_LIMIT + 1];
-	subProcess = new int [PROCESS_LIMIT];
+	clientData *users = new clientData[USER_LIMIT + 1];
+	int *subProcess = new int [PROCESS_LIMIT];
 	for(int i = 0; i < PROCESS_LIMIT; ++i) {
 		subProcess[i] = -1;
 	}
 
-	shmfd = shm_open(SHM_NAME, O_CREATE | O_RDWR, 0666);
+	int shmfd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
 	assert(shmfd != -1);
 	assert(ftruncate(shmfd, USER_LIMIT * BUFFER_SIZE) != -1);
-	shareMem = (char*)mmap(NULL, USER_LIMIT * BUFFER_SIZE, PROT_READ | PORT_WRITE, MAP_SHARE,
+	char *shareMem = (char*)mmap(NULL, USER_LIMIT * BUFFER_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
 			shmfd, 0);
 	assert(shareMem != MAP_FAILED);
 	close(shmfd);
 
-	addsig(SIGCHLD, sighandler);
-	addsig(SIGTERM, sighandler);
-	addsig(SIGINT, sighandler);
-	addsig(SIGPIPE, SIG_IGN);
+	addsig(SIGCHLD, sighandler, 1);
+	addsig(SIGTERM, sighandler, 1);
+	addsig(SIGINT, sighandler, 1);
+	addsig(SIGPIPE, SIG_IGN, 1);
 
 	int isStop = 0, isTerminate = 0, userCnt = 0;
 	while( !isStop ) {
@@ -204,7 +199,7 @@ int main(int argc, char *argv[]) {
 			break;
 		}
 
-		for(i = 0; i < cnt; ++i) {
+		for(int i = 0; i < cnt; ++i) {
 			int fd = events[i].data.fd;
 			if( fd == listenfd ) {
 				struct sockaddr_in clientAddr;
@@ -226,7 +221,7 @@ int main(int argc, char *argv[]) {
 				users[userCnt].addr = clientAddr;
 				users[userCnt].connfd = connfd;
 
-				assert(sockpair(AF_UNIX, SOCK_STREAM, 0, users[userCnt].pipefd) != -1);
+				assert(socketpair(AF_UNIX, SOCK_STREAM, 0, users[userCnt].pipefd) != -1);
 				pid_t pid = fork();
 				if( pid < 0 ) {
 					close(connfd);
@@ -275,9 +270,11 @@ int main(int argc, char *argv[]) {
 
 									epoll_ctl(epollfd, EPOLL_CTL_DEL, users[userIdx].pipefd[0], 0);
 									close(users[userIdx].pipefd[0]);
-									printf("subProcess[users[userIdx].pid] %d , userIdx %d\n",
-											subProcess[users[userIdx].pid], userIdx);
+
+									// replace the disconnect user with the last user
+									users[userIdx] = users[--userCnt];
 									subProcess[users[userIdx].pid] = userIdx;
+									printf("child[%d] is out\n", userIdx);
 								}
 								if( isTerminate && userCnt == 0 ) {
 									isStop = 1;
@@ -307,7 +304,7 @@ int main(int argc, char *argv[]) {
 				if( (ret = recv(fd, (char*)&child, sizeof(child), 0)) > 0 ) {
 					printf("recv data from child[%d]\n", child);
 					for(int j = 0; j < userCnt; ++j) {
-						if( users[userCnt].pipefd[0] != fd ) {
+						if( users[j].pipefd[0] != fd ) {
 							send(users[j].pipefd[0], (char*)&child, sizeof(child), 0);
 						}
 					}
@@ -319,7 +316,14 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	delResource();
+	close(sigPipefd[0]);
+	close(sigPipefd[1]);
+	close(listenfd);
+	close(epollfd);
+	shm_unlink(SHM_NAME);
+	delete[] users;
+	delete[] subProcess;
+	printf("done\n");
 	return 0;
 }
 
