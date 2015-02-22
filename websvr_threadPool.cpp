@@ -1,7 +1,7 @@
 
 /**
   * Note
-  *
+  * 	1. compile with -pthread
   */
 
 #include <sys/socket.h>
@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
 
 	while( true ) {
 		int cnt = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, -1);
-		if( cnt < 0 && errnor != EINTR ) {
+		if( cnt < 0 && errno != EINTR ) {
 			printf("epoll failure\n");
 			break;
 		}
@@ -104,7 +104,7 @@ int main(int argc, char *argv[]) {
 					ShowError(connfd, "Internal server busy");
 					continue;
 				}
-				users[connfd].init(connfd, clientAddr);
+				users[connfd].Init(connfd, clientAddr);
 			}
 			else if( events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR) ) {
 				users[fd].CloseConn();

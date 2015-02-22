@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <exception>
 #include <pthread.h>
-#include <CLocker.h>
+#include "CLocker.h"
 
 template<typename T>
 class CThreadPool {
@@ -28,7 +28,7 @@ class CThreadPool {
 
 			for(int i = 0; i < m_threadCnt; ++i) {
 				// Note: the routine is static, the argument is "this"
-				if( pthread_create(m_threads + i, NULL, worker, this) != 0
+				if( pthread_create(m_threads + i, NULL, Worker, this) != 0
 						|| pthread_detach(m_threads[i]) != 0 ) {
 					delete[] m_threads;
 					throw std::exception();

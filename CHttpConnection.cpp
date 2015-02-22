@@ -11,7 +11,7 @@ const char *ERROR_404_FORM = "The requestd file was not found on this server.\n"
 const char *ERROR_500_TITLE = "Internal Error";
 const char *ERROR_500_FORM = "There was an unusual problem serving the requested file.\n";
 
-const char *DOC_ROOT = "/var/www/html";
+const char *DOC_ROOT = "/var/html";
 
 int CHttpConnection::m_userCnt = 0;
 int CHttpConnection::m_epollfd = -1;
@@ -34,7 +34,7 @@ void AddFd(int epollfd, int fd, bool oneShot) {
 }
 
 void RemoveFd(int epollfd, int fd) {
-	epoll_ctl(epollfd, EPOLL_CTL_DEL, fd);
+	epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, 0);
 	close(fd);
 }
 
@@ -72,7 +72,7 @@ void CHttpConnection::Init() {
 
 	m_version = 0;
 	m_contentLength = 0;
-	m_startLien = 0;
+	m_startLine = 0;
 	m_checkdIdx = 0;
 	m_readIdx = 0;
 	m_writeIdx = 0;
@@ -139,23 +139,24 @@ bool CHttpConnection::Read() {
 
 CHttpConnection::HTTP_CODE CHttpConnection::ParseRequestLine(char *text) {
 	// accept method GET only
-	char *method = text;
-	if( strcasecmp(method, "GET") == 0 ) {
+	char *ctmp = strpbrk(text, " \t");
+	if( !ctmp ) {
+		printf("%d: ERR! bad request %s\n", __LINE__, text);
+		return BAD_REQUEST;
+	}
+	*ctmp++ = '\0';
+	if( strcasecmp(text, "GET") == 0 ) {
 		m_method = GET;
 	}
 	else {
+		printf("accept GET only now, reject method[%s]\n", text);
 		return BAD_REQUEST;
 	}
 
-	m_url = strpbrk(text, " \t");
-	if( !m_url ) {
-		return BAD_REQUEST;
-	}
-	*m_url++ = '\0';
-	m_url += strspn(m_url, " \t");
-
+	m_url = ctmp + strspn(ctmp, "\t");
 	m_version = strpbrk(m_url, " \t");
 	if( !m_version ) {
+		printf("%d: ERR! bad request %s\n", __LINE__, text);
 		return BAD_REQUEST;
 	}
 	*m_version++ = '\0';
@@ -167,6 +168,7 @@ CHttpConnection::HTTP_CODE CHttpConnection::ParseRequestLine(char *text) {
 	}
 
 	if( !m_url || m_url[0] != '/' ) {
+		printf("%d: ERR! bad request %s\n", __LINE__, text);
 		return BAD_REQUEST;
 	}
 
@@ -257,6 +259,8 @@ CHttpConnection::HTTP_CODE CHttpConnection::DoRequest() {
 	int len = strlen(DOC_ROOT);
 	strcpy(m_readFile, DOC_ROOT);
 	strncpy(m_readFile + len, m_url, MAX_FILENAME - len - 1);
+	printf("require %s\n", m_readFile);
+
 	if( stat(m_readFile, &m_fileStat) < 0 ) {
 		return NO_RESOURCE;
 	}
@@ -285,16 +289,17 @@ void CHttpConnection::Unmap() {
 bool CHttpConnection::Write() {
 	int bytesToSend = m_writeIdx;
 	if( bytesToSend == 0 ) {
-		modfd(m_epollfd, m_sockfd, EPOLLIN);
+		ModFd(m_epollfd, m_sockfd, EPOLLIN);
 		Init();
 		return true;
 	}
 
+	int bytesHaveSend;
 	while( true ) {
 		int tmp = writev(m_sockfd, m_iv, m_ivCnt);
 		if( tmp <= -1 ) {
 			if( errno == EAGAIN ) {
-				modfd(m_epollfd, m_sockfd, EPOLLOUT);
+				ModFd(m_epollfd, m_sockfd, EPOLLOUT);
 				return true;
 			}
 			Unmap();
@@ -307,11 +312,11 @@ bool CHttpConnection::Write() {
 			Unmap();
 			if( m_linger ) {
 				Init();
-				modfd(m_epollfd, m_sockfd, EPOLLIN);
+				ModFd(m_epollfd, m_sockfd, EPOLLIN);
 				return true;
 			}
 			else {
-				modfd(m_epollfd, m_sockfd, EPOLLIN);
+				ModFd(m_epollfd, m_sockfd, EPOLLIN);
 				return false;
 			}
 		}
@@ -361,6 +366,7 @@ bool CHttpConnection::AddContent(const char *content) {
 }
 
 bool CHttpConnection::ProcessWrite(HTTP_CODE ret) {
+	printf("response is[%d]\n", ret);
 	switch(ret) {
 		case INTERNAL_ERROR:
 			AddStatusLine(500, ERROR_500_TITLE);

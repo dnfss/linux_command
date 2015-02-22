@@ -14,7 +14,7 @@ class CSemaphore {
 		}
 
 		~CSemaphore() {
-			sem_destory(&m_sem);
+			sem_destroy(&m_sem);
 		}
 
 		bool Wait() {
@@ -38,7 +38,7 @@ class CMutex {
 		}
 
 		~CMutex() {
-			pthread_mutex_destory(&m_mutex);
+			pthread_mutex_destroy(&m_mutex);
 		}
 
 		bool Lock() {
@@ -56,18 +56,18 @@ class CMutex {
 class CCond {
 	public:
 		CCond() {
-			if( pthread_mutex_init(&m_mutex, NULL) != NULL ) {
+			if( pthread_mutex_init(&m_mutex, NULL) != 0 ) {
 				throw std::exception();
 			}
 
 			if( pthread_cond_init(&m_cond, NULL) != 0 ) {
-				pthread_mutex_destory(&m_mutex);
+				pthread_mutex_destroy(&m_mutex);
 				throw std::exception();
 			}
 		}
 
 		~CCond() {
-			pthread_mutex_destory(&m_mutex);
+			pthread_mutex_destroy(&m_mutex);
 			pthread_cond_destroy(&m_cond);
 		}
 

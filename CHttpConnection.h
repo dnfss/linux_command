@@ -1,7 +1,7 @@
 
 /**
   * Note
-  *
+  * 	1. how to process request with state machine
   */
 
 #pragma once
@@ -23,7 +23,7 @@
 #include <sys/mman.h>
 #include <stdarg.h>
 #include <errno.h>
-#include <CLocker.h>
+#include "CLocker.h"
 
 class CHttpConnection {
 	public:
@@ -63,8 +63,8 @@ class CHttpConnection {
 			LINE_OPEN
 		};
 
-		CHttpConnection();
-		~CHttpConnection();
+		CHttpConnection() {};
+		~CHttpConnection() {};
 
 		void Init(int sockfd, const sockaddr_in &addr);
 
@@ -112,7 +112,7 @@ class CHttpConnection {
 
 		int m_readIdx;
 		int m_checkdIdx;
-		int m_startLien;
+		int m_startLine;
 		char m_readBuf[READ_BUFFER_SIZE];
 
 		int m_writeIdx;
